@@ -7,21 +7,11 @@ import scala.util.{Failure, Success, Try}
 
 object Rover {
 
-  sealed trait Message
-  final case class Position(x: Int, y: Int, orientation: Orientation) extends Message
-  final case class Error(desc: String) extends Message
+  final case class RoverCommand(moveInstructions: MoveInstructions, replyTo: ActorRef[RoverReply])
 
-  final case class CommandWrapper(command: Command, replyTo: ActorRef[Message])
-
-  sealed trait Command
-  final case class Initialize(position: Position) extends Command
-  final case class MoveInstructions(str: String) extends Command
-
-  protected sealed trait MoveCommand
-  case object Forward extends MoveCommand
-  case object Backward extends MoveCommand
-  case object Left extends MoveCommand
-  case object Right extends MoveCommand
+  sealed trait RoverReply
+  final case class Position(x: Int, y: Int, orientation: Orientation) extends RoverReply
+  final case class Error(desc: String) extends RoverReply
 
   sealed trait Orientation(val left: Orientation, val right: Orientation)
   case object North extends Orientation(West, East)
@@ -29,23 +19,25 @@ object Rover {
   case object South extends Orientation(East, West)
   case object West extends Orientation(South, North)
 
-  def apply(): Behavior[CommandWrapper] = uninitialized()
+  final case class MoveInstructions(str: String)
+  protected sealed trait MoveCommand
+  protected case object Forward extends MoveCommand
+  protected case object Backward extends MoveCommand
+  protected case object Left extends MoveCommand
+  protected case object Right extends MoveCommand
 
-  private def uninitialized(): Behavior[CommandWrapper] = {
-    Behaviors.receive {
-      case (_, CommandWrapper(Initialize(position), replyTo)) =>
-        replyTo ! position
-        initialized(position)
-      case (_, CommandWrapper(_, replyTo)) =>
-        replyTo ! Error("Unsupported command!")
-        Behaviors.same
-    }
+  def apply(position: Position, replyTo: ActorRef[RoverReply]): Behavior[RoverCommand] = {
+    replyTo ! position
+    initialized(position)
   }
 
-  private def initialized(currP: Position): Behavior[CommandWrapper] = {
-    Behaviors.receivePartial {
-      case (_, CommandWrapper(MoveInstructions(instr), replyTo)) =>
+  def apply(position: Position): Behavior[RoverCommand] = {
+    initialized(position)
+  }
 
+  private def initialized(currP: Position): Behavior[RoverCommand] = {
+    Behaviors.receive {
+      case (context, RoverCommand(MoveInstructions(instr), replyTo)) =>
         Try {
           MoveInstructions.moveCommands(instr)
             .foldLeft(currP) { (acc, mc) =>
@@ -64,9 +56,6 @@ object Rover {
             replyTo ! Error(e.getMessage)
             Behaviors.same
         }
-      case (_, CommandWrapper(_, replyTo)) =>
-        replyTo ! Error("Unsupported command")
-        Behaviors.same
     }
   }
 

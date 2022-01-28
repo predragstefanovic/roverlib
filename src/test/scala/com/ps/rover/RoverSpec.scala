@@ -9,24 +9,13 @@ class RoverSpec extends ScalaTestWithActorTestKit with AnyWordSpecLike with Tabl
 
   "A Rover" must {
     "initialize and reply its Position" in {
-      val probe = createTestProbe[Message]()
-      val rover = spawn(Rover())
-      rover ! CommandWrapper(Initialize(Position(4, 2, East)), probe.ref)
+      val probe = createTestProbe[RoverReply]()
+      val rover = spawn(Rover(Position(4, 2, East), probe.ref))
       probe.expectMessage(Position(4, 2, East))
-    }
-
-    "allow only one initialization" in {
-      val probe = createTestProbe[Message]()
-      val rover = spawn(Rover())
-      rover ! CommandWrapper(Initialize(Position(4, 2, East)), probe.ref)
-      probe.expectMessage(Position(4, 2, East))
-      rover ! CommandWrapper(Initialize(Position(4, 2, East)), probe.ref)
-      probe.expectMessageType[Error]
     }
 
     "move in all directions" in {
-      val probe = createTestProbe[Message]()
-      val initCmd = Initialize(Position(4, 2, East))
+      val probe = createTestProbe[RoverReply]()
 
       val cases = Table(
         ("instr", "position"),
@@ -35,33 +24,24 @@ class RoverSpec extends ScalaTestWithActorTestKit with AnyWordSpecLike with Tabl
         (MoveInstructions("LLLL"), Position(4, 2, East)),
         (MoveInstructions(""), Position(4, 2, East)),
         (MoveInstructions("FLFFFRFLB"), Position(6, 4, North)),
+        (MoveInstructions("BBBBBBBB"), Position(-4, 2, East)),
+        (MoveInstructions("RFFFFL"), Position(4, -2, East)),
       )
 
       forAll(cases) { (moveInstrCmd: MoveInstructions, position: Position) =>
-        val rover = spawn(Rover())
-        rover ! CommandWrapper(initCmd, probe.ref)
-        probe.expectMessage(Position(4, 2, East))
+        val rover = spawn(Rover(Position(4, 2, East)))
 
-        rover ! CommandWrapper(moveInstrCmd, probe.ref)
+        rover ! RoverCommand(moveInstrCmd, probe.ref)
         probe.expectMessage(position)
       }
     }
 
-    "fail on unsupported commands" in {
-      val probe = createTestProbe[Message]()
-      val rover = spawn(Rover())
+    "fail on unsupported move commands" in {
+      val probe = createTestProbe[RoverReply]()
+      val rover = spawn(Rover(Position(4, 2, East)))
 
-      // before init
-      rover ! CommandWrapper(MoveInstructions("FR%L"), probe.ref)
+      rover ! RoverCommand(MoveInstructions("FR%L"), probe.ref)
       probe.expectMessageType[Error]
-
-      rover ! CommandWrapper(Initialize(Position(4, 2, East)), probe.ref)
-      probe.expectMessage(Position(4, 2, East))
-
-      // after init
-      rover ! CommandWrapper(MoveInstructions("FR%L"), probe.ref)
-      probe.expectMessageType[Error]
-
     }
   }
 
