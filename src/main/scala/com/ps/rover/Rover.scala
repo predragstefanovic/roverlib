@@ -3,19 +3,25 @@ package com.ps.rover
 import akka.actor.typed.scaladsl.Behaviors
 import akka.actor.typed.{ActorRef, Behavior}
 
+import scala.util.{Failure, Success, Try}
+
 object Rover {
 
   sealed trait Message
-  final case class CommandWrapper(command: Command, replyTo: ActorRef[Position]) extends Message
   final case class Position(x: Int, y: Int, orientation: Orientation) extends Message
+  final case class Error(desc: String) extends Message
+
+  final case class CommandWrapper(command: Command, replyTo: ActorRef[Message])
 
   sealed trait Command
-  sealed trait MoveCommand extends Command
+  final case class Initialize(position: Position) extends Command
+  final case class MoveInstructions(str: String) extends Command
+
+  protected sealed trait MoveCommand
   case object Forward extends MoveCommand
   case object Backward extends MoveCommand
   case object Left extends MoveCommand
   case object Right extends MoveCommand
-  final case class Initialize(position: Position) extends Command
 
   sealed trait Orientation(val left: Orientation, val right: Orientation)
   case object North extends Orientation(West, East)
@@ -23,28 +29,44 @@ object Rover {
   case object South extends Orientation(East, West)
   case object West extends Orientation(South, North)
 
-  def apply(): Behavior[Message] = uninitialized()
+  def apply(): Behavior[CommandWrapper] = uninitialized()
 
-  private def uninitialized(): Behavior[Message] = {
-    Behaviors.receivePartial {
+  private def uninitialized(): Behavior[CommandWrapper] = {
+    Behaviors.receive {
       case (_, CommandWrapper(Initialize(position), replyTo)) =>
         replyTo ! position
         initialized(position)
+      case (_, CommandWrapper(_, replyTo)) =>
+        replyTo ! Error("Unsupported command!")
+        Behaviors.same
     }
   }
 
-  private def initialized(currP: Position): Behavior[Message] = {
+  private def initialized(currP: Position): Behavior[CommandWrapper] = {
     Behaviors.receivePartial {
-      case (_, CommandWrapper(cmd: MoveCommand, replyTo)) =>
-        val newP = (cmd match {
-          case Forward => Position.stepForward
-          case Backward => Position.stepBackward
-          case Left => Position.rotateLeft
-          case Right => Position.rotateRight
-        })(currP)
+      case (_, CommandWrapper(MoveInstructions(instr), replyTo)) =>
 
-        replyTo ! newP
-        initialized(newP)
+        Try {
+          MoveInstructions.moveCommands(instr)
+            .foldLeft(currP) { (acc, mc) =>
+              (mc match {
+                case Forward => Position.stepForward
+                case Backward => Position.stepBackward
+                case Left => Position.rotateLeft
+                case Right => Position.rotateRight
+              })(acc)
+            }
+        } match {
+          case Success(newP) =>
+            replyTo ! newP
+            initialized(newP)
+          case Failure(e) =>
+            replyTo ! Error(e.getMessage)
+            Behaviors.same
+        }
+      case (_, CommandWrapper(_, replyTo)) =>
+        replyTo ! Error("Unsupported command")
+        Behaviors.same
     }
   }
 
@@ -61,6 +83,17 @@ object Rover {
       case East => Position(p.x + i, p.y, p.orientation)
       case West => Position(p.x - i, p.y, p.orientation)
     }
+  }
+
+  object MoveInstructions {
+    def moveCommands(str: String): Seq[MoveCommand] =
+      str.toSeq.map {
+        case 'F' => Forward
+        case 'B' => Backward
+        case 'L' => Left
+        case 'R' => Right
+        case _ => throw new IllegalArgumentException
+      }
   }
 }
 
